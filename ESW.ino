@@ -1,20 +1,33 @@
+// Embedded Systems Workshop - Lab 2 and 3
+// Tushar Choudhary
+
 #include "DHT.h"
 #include <WiFi.h>
 #include <WiFiMulti.h>
+#include "BluetoothSerial.h"
 
+// Defining the max safe temperature
+int safe_t=15;
+
+// Pin numbers for LEDs and buzzer
+const byte alert = 23;
+const byte not_alert = 22;
+
+// WiFi and Bluetooh details
 #define WIFI_NAME "OnePlus"
 #define PASSWORD "56781234"
 #define TIMEOUT  5000                              // Timeout for server response.
+BluetoothSerial SerialBT;
 WiFiClient client;
 
-// ThingSpeak information.
+// ThingSpeak details
 #define NUM_FIELDS 3                               // To update more fields, increase this number and add a field label below.
 #define THING_SPEAK_ADDRESS "api.thingspeak.com"
 String writeAPIKey="YHZDPHX3B3S1OZB6";             // Change this to the write API key for your channel.
 
+// For connecting to WiFi
 int connectWifi()
-{
-    
+{   
     while (WiFi.status() != WL_CONNECTED) {
         WiFi.begin( WIFI_NAME , PASSWORD );
         Serial.println( "Connecting to Wi-Fi" );
@@ -22,11 +35,8 @@ int connectWifi()
     }
     Serial.println( "Connected" );  // Inform the serial monitor.
 }
-// This function builds the data string for posting to ThingSpeak
-    // and provides the correct format for the wifi client to communicate with ThingSpeak.
-    // It posts numFields worth of data entries, and takes the
-    // data from the fieldData parameter passed to it. 
-  
+
+// For updating the data obtained on ThingSpeak
 int HTTPPost( int numFields , String fieldData[] ){
   
     if (client.connect( THING_SPEAK_ADDRESS , 80 )){
@@ -40,10 +50,9 @@ int HTTPPost( int numFields , String fieldData[] ){
             
             }
 
-        // POST data via HTTP.
+        // Print statements for debugging
         Serial.println( "Connecting to ThingSpeak for update..." );
         Serial.println();
-        
         client.println( "POST /update HTTP/1.1" );
         client.println( "Host: api.thingspeak.com" );
         client.println( "Connection: close" );
@@ -51,9 +60,7 @@ int HTTPPost( int numFields , String fieldData[] ){
         client.println( "Content-Length: " + String( postData.length() ) );
         client.println();
         client.println( postData );
-        
         Serial.println( postData );
-        
         String answer=getResponse();
         Serial.println( answer );
     }
@@ -64,9 +71,7 @@ int HTTPPost( int numFields , String fieldData[] ){
     
 }
 
-// Wait for a response from the server indicating availability,
-// and then collect the response and build it into a string.
-
+// Function for getting the acknowledgement from ThingSpeak after posting data
 String getResponse(){
   String response;
   long startTime = millis();
@@ -88,59 +93,51 @@ String getResponse(){
   return response;
 }
 
-#define DHTPIN 4     // Digital pin connected to the DHT sensor
-// Feather HUZZAH ESP8266 note: use pins 3, 4, 5, 12, 13 or 14 --
-// Pin 15 can work but DHT must be disconnected during program upload.
+// Input pin for Lm35
+int lm35=13;
 
-// Uncomment whatever type you're using!
-//#define DHTTYPE DHT11   // DHT 11
-#define DHTTYPE DHT22   // DHT 22  (AM2302), AM2321
-//#define DHTTYPE DHT21   // DHT 21 (AM2301)
-
-// Connect pin 1 (on the left) of the sensor to +5V
-// NOTE: If using a board with 3.3V logic like an Arduino Due connect pin 1
-// to 3.3V instead of 5V!
-// Connect pin 2 of the sensor to whatever your DHTPIN is
-// Connect pin 4 (on the right) of the sensor to GROUND
-// Connect a 10K resistor from pin 2 (data) to pin 1 (power) of the sensor
-
-// Initialize DHT sensor.
-// Note that older versions of this library took an optional third parameter to
-// tweak the timings for faster processors.  This parameter is no longer needed
-// as the current DHT reading algorithm adjusts itself to work on faster procs.
+// Detials for DHT22 sensor
+#define DHTPIN 4    
+#define DHTTYPE DHT22   
 DHT dht(DHTPIN, DHTTYPE);
 
 void setup() {
   Serial.begin(9600);
+  pinMode(lm35, INPUT); 
+  SerialBT.begin("Tushar ESW");
   connectWifi();
   Serial.println(F("DHTxx test!"));
-
+  pinMode(alert, OUTPUT);
+  pinMode(not_alert, OUTPUT);
   dht.begin();
 }
 
 void loop() {
-  // Wait a few seconds between measurements.
-  delay(2000);
 
-  // Reading temperature or humidity takes about 250 milliseconds!
-  // Sensor readings may also be up to 2 seconds 'old' (its a very slow sensor)
+  // A short delay after every measurement
+  delay(30000);
+  
+  // Getting the data from DHT
   float h = dht.readHumidity();
-  // Read temperature as Celsius (the default)
   float t = dht.readTemperature();
-  // Read temperature as Fahrenheit (isFahrenheit = true)
   float f = dht.readTemperature(true);
-
-  // Check if any reads failed and exit early (to try again).
   if (isnan(h) || isnan(t) || isnan(f)) {
     Serial.println(F("Failed to read from DHT sensor!"));
     return;
   }
-
-  // Compute heat index in Fahrenheit (the default)
   float hif = dht.computeHeatIndex(f, h);
-  // Compute heat index in Celsius (isFahreheit = false)
   float hic = dht.computeHeatIndex(t, h, false);
 
+  // Getting data from Lm35
+  int analogValue = analogRead(lm35);
+  float millivolts = (analogValue/1024.0) * 3300;
+  float lmc = millivolts/10;
+  float lmf = ((lmc * 9)/5 + 32);
+
+  t = (t+lmc)/2;
+  f = (f+lmf)/2;
+  
+  // Printing the data on serial monitor
   Serial.print(F("Humidity: "));
   Serial.print(h);
   Serial.print(F("%  Temperature: "));
@@ -153,6 +150,31 @@ void loop() {
   Serial.print(hif);
   Serial.println(F("째F"));
 
+  // Printing the data to bluetooth connected mobile device
+  SerialBT.println("Humidity: ");
+  SerialBT.println(h);
+  SerialBT.println("Temperature (celsius): ");
+  SerialBT.println(t);
+  SerialBT.println("Heat Index: ");
+  SerialBT.println(hic);
+  SerialBT.println(" ");
+
+  // Checking if the data lies in the safe range
+  if (t>=safe_t)
+  {
+    SerialBT.println("Temperature is outside the safety range!");
+    Serial.println("Temperature is outside the safety range!");
+    digitalWrite(alert, HIGH);
+    digitalWrite(not_alert, LOW);   
+  }
+
+  else
+  {
+    digitalWrite(alert, LOW);
+    digitalWrite(not_alert, HIGH);   
+  }
+
+  // Calling the function to update data on ThingSpeak
   String fieldData[ NUM_FIELDS ];  
   fieldData[1]=h;
   fieldData[2]=t;
